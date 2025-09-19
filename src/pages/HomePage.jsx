@@ -51,16 +51,16 @@ const HomePage = () => {
 
 
     return (
-        <Box sx={{ minHeight: '100vh', display: 'flex', flexDirection: 'column', padding: 4, background: '#f4f6f8' }}>
+        <Box sx={{ minHeight: '100vh', display: 'flex', flexDirection: 'column', padding: { xs: 2, sm: 4 }, background: '#f4f6f8' }}>
             <Container maxWidth="lg" sx={{ flexGrow: 1 }}>
-                <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
-                    <Box sx={{ display: 'flex', alignItems: 'center' }}>
+                <Box sx={{ display: 'flex', justifyContent: { xs: 'center', sm: 'space-between' }, alignItems: 'center', mb: 2, flexDirection: { xs: 'column', sm: 'row' } }}>
+                    <Box sx={{ display: 'flex', alignItems: 'center', mb: { xs: 2, sm: 0 } }}>
                         <Avatar src="https://static.mygov.in/media/blog/2017/06/pic3.jpg" alt="IPPB Logo" sx={{ width: 50, height: 50, mr: 2 }} />
                         <Typography variant="h5" component="h1" sx={{ color: '#333', fontWeight: 'bold' }}>
                             India Post Payments Bank
                         </Typography>
                     </Box>
-                    <Box>
+                    <Box sx={{ display: 'flex', flexDirection: { xs: 'column', sm: 'row' }, alignItems: 'center' }}>
                         <Tooltip title="View account balance and epassbook functionality for POSB accounts">
                             <Button 
                                 variant="contained" 
@@ -71,7 +71,8 @@ const HomePage = () => {
                                     boxShadow: '0 3px 5px 2px rgba(255, 105, 135, .3)',
                                     color: 'white',
                                     borderRadius: '12px',
-                                    mr: 2
+                                    mb: { xs: 1, sm: 0 },
+                                    mr: { xs: 0, sm: 2 }
                                 }}
                             >
                                 <LoginIcon sx={{ mr: 1 }} />
@@ -107,7 +108,7 @@ const HomePage = () => {
                 </Box>
 
                 <Grid container spacing={4}>
-                     <Grid item xs={12} sm={6} md={3}>
+                     <Grid item xs={12} md={4}>
                         <Card sx={cardStyle}>
                             <CardContent sx={{ textAlign: 'center', color: '#333' }}>
                                 <AccessTimeFilledIcon sx={{ fontSize: 40, mb: 1, color: '#1976d2' }} />
@@ -117,7 +118,7 @@ const HomePage = () => {
                         </Card>
                     </Grid>
 
-                    <Grid item xs={12} sm={6} md={3}>
+                    <Grid item xs={12} md={4}>
                         <Card sx={cardStyle}>
                             <CardContent sx={{ textAlign: 'center', color: '#333' }}>
                                 <CalendarTodayIcon sx={{ fontSize: 40, mb: 1, color: '#1976d2' }} />
@@ -128,7 +129,7 @@ const HomePage = () => {
                     </Grid>
 
 
-                    <Grid item xs={12} sm={6} md={3}>
+                    <Grid item xs={12} md={4}>
                         <Card sx={cardStyle}>
                             <CardContent sx={{ color: '#333' }}>
                                 <Box sx={{ display: 'flex', alignItems: 'center', mb: 1 }}>
