@@ -1,12 +1,66 @@
-# React + Vite
+# Shravan
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+Shravan is a React + Vite + Firebase agent portal for recurring deposit operations.
 
-Currently, two official plugins are available:
+## What is implemented
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Babel](https://babeljs.io/) for Fast Refresh
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/) for Fast Refresh
+- Agent login with fixed `agentId`, password, and app captcha
+- No public registration flow
+- OTP-based password reset flow for agent accounts
+- Home dashboard with agent details, current date and time, weather, active-user count, and users nearing maturity
+- Searchable user directory with filters for account ID, first name, mobile, email, and nominee name
+- Daily schedule page that saves daily payment entries and updates monthly summaries automatically
+- Per-user detail page with payment history and monthly summary history
 
-## Expanding the ESLint configuration
+## Firestore collections expected
 
-If you are developing a production application, we recommend using TypeScript with type-aware lint rules enabled. Check out the [TS template](https://github.com/vitejs/vite/tree/main/packages/create-vite/template-react-ts) for information on how to integrate TypeScript and [`typescript-eslint`](https://typescript-eslint.io) in your project.
+### `agents`
+Each document should contain:
+
+- `agentId`
+- `agentName`
+- `role`
+- `adminPhone`
+- `passwordHash` or legacy `password`
+- `isActive`
+
+### `users`
+Each document should contain:
+
+- `agentId`
+- `firstName`
+- `lastName`
+- `nomineeName`
+- `accountNumber`
+- `accountOpeningDate`
+- `address`
+- `mobileNumber`
+- `email`
+- `denomination`
+- `accountType`
+- `totalDepositedAmountSoFar`
+- `monthPaidUpTo`
+- `dateOfLastDeposit`
+- `isActive`
+
+### `dailyPayments`
+Saved from the daily schedule page.
+
+### `userMonthlySummary`
+Upserted automatically from daily payment entries.
+
+### `otpResets`
+Stores OTP reset requests for password updates.
+
+## Local run
+
+```bash
+npm install
+npm run dev
+```
+
+## Notes
+
+- OTP currently uses a development preview inside the UI. Wire it to your SMS provider for production.
+- Weather is fetched client-side from Open-Meteo for Kolkata.
+- If Firestore asks for a composite index, create the suggested index from the Firebase console for the query shown in the error message.
