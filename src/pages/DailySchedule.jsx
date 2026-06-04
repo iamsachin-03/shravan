@@ -1,258 +1,232 @@
-import React, { useState, useEffect, useContext } from 'react';
-import { TextField, Button, Typography, Container, Card, CardContent, Box, Snackbar, Alert, CircularProgress } from '@mui/material';
+import React, { useContext, useEffect, useMemo, useState } from 'react';
+import { Alert, Box, Button, Card, CardContent, CircularProgress, Container, Snackbar, Stack, TextField, Typography } from '@mui/material';
 import { AdapterDateFns } from '@mui/x-date-pickers/AdapterDateFns';
 import { LocalizationProvider } from '@mui/x-date-pickers/LocalizationProvider';
 import { DatePicker } from '@mui/x-date-pickers/DatePicker';
 import { DataGrid } from '@mui/x-data-grid';
+import { Link } from 'react-router-dom';
+import { Timestamp, addDoc, collection, doc, getDocs, query, updateDoc, where } from 'firebase/firestore';
 import { db } from '../firebase';
-import { collection, getDocs, addDoc, query, where, Timestamp, doc, setDoc, getDoc, updateDoc } from 'firebase/firestore';
 import { DataContext } from '../context/DataContext';
+import { updateMonthlySummaryForUser } from '../utils/monthlySummary';
 
 const DailySchedule = () => {
-  const [customers, setCustomers] = useState([]);
+  const { user, users } = useContext(DataContext);
   const [searchQuery, setSearchQuery] = useState('');
   const [payments, setPayments] = useState({});
+  const [notes, setNotes] = useState({});
   const [date, setDate] = useState(new Date());
   const [snackbar, setSnackbar] = useState({ open: false, message: '', severity: 'success' });
   const [loading, setLoading] = useState(true);
-  const { user } = useContext(DataContext);
 
   useEffect(() => {
-    const fetchCustomersAndPayments = async () => {
+    const fetchPayments = async () => {
       setLoading(true);
-
-      const usersSnapshot = await getDocs(collection(db, 'users'));
-      const validUsersList = usersSnapshot.docs
-          .map(doc => ({ ...doc.data(), id: doc.id }))
-          .filter(user => user.accountNumber && user.firstName);
-
-      const orderDocRef = doc(db, 'userOrder', 'dailySchedule');
-      const orderDocSnap = await getDoc(orderDocRef);
-
-      let finalList = validUsersList;
-
-      if (orderDocSnap.exists()) {
-          const savedOrder = orderDocSnap.data().order;
-          const userMap = new Map(validUsersList.map(user => [user.id, user]));
-          const orderedUsers = [];
-
-          savedOrder.forEach(userId => {
-              if (userMap.has(userId)) {
-                  orderedUsers.push(userMap.get(userId));
-                  userMap.delete(userId); 
-              }
-          });
-
-          finalList = [...orderedUsers, ...userMap.values()];
-      } 
-
-      setCustomers(finalList);
-
-      const startOfDay = new Date(date.setHours(0, 0, 0, 0));
-      const endOfDay = new Date(date.setHours(23, 59, 59, 999));
+      const startOfDay = new Date(date);
+      startOfDay.setHours(0, 0, 0, 0);
+      const endOfDay = new Date(date);
+      endOfDay.setHours(23, 59, 59, 999);
 
       const paymentsQuery = query(
         collection(db, 'dailyPayments'),
+        where('agentId', '==', user.agentId),
         where('date', '>=', Timestamp.fromDate(startOfDay)),
         where('date', '<=', Timestamp.fromDate(endOfDay))
       );
 
       const paymentsSnapshot = await getDocs(paymentsQuery);
       const paymentsData = {};
-      paymentsSnapshot.forEach(doc => {
-        const data = doc.data();
-        paymentsData[data.customerId] = {
-            amount: data.amountPaid,
-            docId: doc.id,
-        };
-      });
-      setPayments(paymentsData);
+      const notesData = {};
 
+      paymentsSnapshot.forEach((docItem) => {
+        const data = docItem.data();
+        paymentsData[data.customerId] = {
+          amount: data.amountPaid,
+          docId: docItem.id,
+        };
+        notesData[data.customerId] = data.note || '';
+      });
+
+      setPayments(paymentsData);
+      setNotes(notesData);
       setLoading(false);
     };
 
-    if (user) {
-        fetchCustomersAndPayments();
+    if (user?.agentId) {
+      fetchPayments();
     }
   }, [date, user]);
 
   const handlePaymentChange = (customerId, amount) => {
-    setPayments(prev => ({
-        ...prev,
-        [customerId]: {
-            ...prev[customerId],
-            amount: amount,
-        }
+    setPayments((current) => ({
+      ...current,
+      [customerId]: {
+        ...current[customerId],
+        amount,
+      },
     }));
   };
 
-  const handleSavePayment = async (customerId, amount) => {
-    const parsedAmount = parseFloat(amount);
-    if (isNaN(parsedAmount) || parsedAmount < 0) {
-        setSnackbar({ open: true, message: 'Please enter a valid positive amount.', severity: 'error' });
-        return;
+  const handleNoteChange = (customerId, note) => {
+    setNotes((current) => ({ ...current, [customerId]: note }));
+  };
+
+  const showMessage = (message, severity = 'success') => setSnackbar({ open: true, message, severity });
+
+  const handleSavePayment = async (customer) => {
+    const currentPayment = payments[customer.id];
+    const parsedAmount = Number(currentPayment?.amount || 0);
+
+    if (!parsedAmount || parsedAmount < 0) {
+      showMessage('Enter a valid amount before saving.', 'error');
+      return;
     }
 
-    const existingPayment = payments[customerId];
+    const payload = {
+      customerId: customer.id,
+      accountNumber: customer.accountNumber,
+      customerName: `${customer.firstName} ${customer.lastName || ''}`.trim(),
+      amountPaid: parsedAmount,
+      date: Timestamp.fromDate(new Date(date.getFullYear(), date.getMonth(), date.getDate(), 12, 0, 0, 0)),
+      agentId: user.agentId,
+      note: notes[customer.id] || '',
+      updatedAt: Timestamp.now(),
+    };
 
     try {
-      if (existingPayment && existingPayment.docId) {
-        const paymentDocRef = doc(db, 'dailyPayments', existingPayment.docId);
-        await updateDoc(paymentDocRef, {
-          amountPaid: parsedAmount
-        });
-        setSnackbar({ open: true, message: `Payment updated to ${parsedAmount}.`, severity: 'success' });
+      if (currentPayment?.docId) {
+        await updateDoc(doc(db, 'dailyPayments', currentPayment.docId), payload);
       } else {
-        const newPaymentRef = await addDoc(collection(db, 'dailyPayments'), {
-          customerId,
-          amountPaid: parsedAmount,
-          date: Timestamp.fromDate(new Date(date.setHours(12,0,0,0))),
-          agentId: user.id,
+        const newDoc = await addDoc(collection(db, 'dailyPayments'), {
+          ...payload,
+          createdAt: Timestamp.now(),
         });
-        setPayments(prev => ({
-            ...prev,
-            [customerId]: {
-                amount: parsedAmount,
-                docId: newPaymentRef.id,
-            }
+        setPayments((current) => ({
+          ...current,
+          [customer.id]: { amount: parsedAmount, docId: newDoc.id },
         }));
-        setSnackbar({ open: true, message: `Payment of ${parsedAmount} saved.`, severity: 'success' });
       }
+
+      const { totalAmountReceived, monthPaidUpTo } = await updateMonthlySummaryForUser({
+        customer,
+        entryDate: date,
+        latestAmount: parsedAmount,
+      });
+
+      await updateDoc(doc(db, 'users', customer.id), {
+        totalDepositedAmountSoFar: totalAmountReceived,
+        monthPaidUpTo,
+        dateOfLastDeposit: Timestamp.fromDate(date),
+        updatedAt: Timestamp.now(),
+      });
+
+      showMessage(`Saved ${parsedAmount} for ${customer.firstName}. Monthly summary updated.`);
     } catch (error) {
-      console.error("Error saving payment: ", error);
-      setSnackbar({ open: true, message: `Error saving payment: ${error.message}`, severity: 'error' });
+      console.error('Error saving payment:', error);
+      showMessage(error.message || 'Failed to save payment', 'error');
     }
   };
 
-  const handleCloseSnackbar = (event, reason) => {
-    if (reason === 'clickaway') return;
-    setSnackbar({ ...snackbar, open: false });
-  };
-  
-  const filteredCustomers = customers.filter(customer =>
-    customer.firstName.toLowerCase().includes(searchQuery.toLowerCase()) ||
-    (customer.lastName && customer.lastName.toLowerCase().includes(searchQuery.toLowerCase())) ||
-    customer.accountNumber.toString().includes(searchQuery)
-  );
+  const filteredCustomers = useMemo(() => {
+    return users.filter((customer) => {
+      const text = searchQuery.toLowerCase();
+      return (
+        `${customer.firstName || ''} ${customer.lastName || ''}`.toLowerCase().includes(text) ||
+        String(customer.accountNumber || '').toLowerCase().includes(text) ||
+        String(customer.nomineeName || '').toLowerCase().includes(text)
+      );
+    });
+  }, [searchQuery, users]);
+
+  const totalCollected = Object.values(payments).reduce((sum, entry) => sum + Number(entry?.amount || 0), 0);
 
   const columns = [
     {
-        field: 'serialNumber',
-        headerName: '#',
-        width: 50,
-        sortable: false,
-        renderCell: (params) => (
-            <Typography variant="subtitle1">{params.value}</Typography>
-        )
+      field: 'name',
+      headerName: 'Name',
+      flex: 1.2,
+      renderCell: (params) => (
+        <Box>
+          <Typography component={Link} to={`/user-details/${params.row.id}`} sx={{ textDecoration: 'none', color: '#0e6d62', fontWeight: 700 }}>
+            {params.row.firstName} {params.row.lastName}
+          </Typography>
+          <Typography variant="body2" color="text.secondary">{params.row.accountNumber}</Typography>
+        </Box>
+      ),
     },
     {
-        field: 'name',
-        headerName: 'Name',
-        flex: 1,
-        renderCell: (params) => (
-            <div>
-                <Typography variant="subtitle1" noWrap>{params.row.firstName} {params.row.lastName}</Typography>
-                <Typography variant="body2" color="text.secondary">{params.row.accountNumber}</Typography>
-            </div>
-        )
+      field: 'amountPaid',
+      headerName: 'Amount',
+      flex: 0.9,
+      renderCell: (params) => (
+        <TextField type="number" size="small" value={payments[params.row.id]?.amount || ''} onChange={(event) => handlePaymentChange(params.row.id, event.target.value)} fullWidth />
+      ),
     },
     {
-        field: 'amountPaid',
-        headerName: 'Amount Paid',
-        flex: 1,
-        renderCell: (params) => (
-            <TextField
-                placeholder="Enter amount"
-                type="number"
-                value={payments[params.row.id]?.amount || ''}
-                onChange={(e) => handlePaymentChange(params.row.id, e.target.value)}
-                variant="outlined"
-                size="small"
-                fullWidth
-                sx={{
-                    '& input::-webkit-outer-spin-button, & input::-webkit-inner-spin-button': {
-                        display: 'none',
-                    },
-                    '& input[type=number]': {
-                        '-moz-appearance': 'textfield',
-                    },
-                }}
-            />
-        )
+      field: 'note',
+      headerName: 'Note',
+      flex: 1.2,
+      renderCell: (params) => (
+        <TextField size="small" value={notes[params.row.id] || ''} onChange={(event) => handleNoteChange(params.row.id, event.target.value)} fullWidth placeholder="Optional note" />
+      ),
     },
     {
-        field: 'action',
-        headerName: 'Action',
-        flex: 1,
-        renderCell: (params) => (
-            <Button
-                variant="contained"
-                color="primary"
-                onClick={() => handleSavePayment(params.row.id, payments[params.row.id]?.amount)}
-                fullWidth
-            >
-                Save
-            </Button>
-        )
-    }
+      field: 'action',
+      headerName: 'Action',
+      flex: 0.7,
+      sortable: false,
+      renderCell: (params) => (
+        <Button variant="contained" onClick={() => handleSavePayment(params.row)} fullWidth>
+          Save
+        </Button>
+      ),
+    },
   ];
-
-  const rows = filteredCustomers.map((customer, index) => ({
-      ...customer,
-      serialNumber: index + 1,
-  }));
 
   if (loading || !user) {
     return (
-        <Container sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100vh' }}>
-            <CircularProgress />
-        </Container>
+      <Container sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100vh' }}>
+        <CircularProgress />
+      </Container>
     );
   }
 
   return (
-    <Container maxWidth="lg">
-      <Snackbar open={snackbar.open} autoHideDuration={4000} onClose={handleCloseSnackbar} anchorOrigin={{ vertical: 'bottom', horizontal: 'center' }}>
-        <Alert onClose={handleCloseSnackbar} severity={snackbar.severity} sx={{ width: '100%' }} variant="filled">
-          {snackbar.message}
-        </Alert>
+    <Container maxWidth="xl" sx={{ py: 4 }}>
+      <Snackbar open={snackbar.open} autoHideDuration={4000} onClose={() => setSnackbar((current) => ({ ...current, open: false }))} anchorOrigin={{ vertical: 'bottom', horizontal: 'center' }}>
+        <Alert severity={snackbar.severity} variant="filled">{snackbar.message}</Alert>
       </Snackbar>
 
-      <Card>
+      <Card sx={{ borderRadius: 6 }}>
         <CardContent>
-          <Typography variant="h5" gutterBottom>
-            Daily Collection Schedule
-          </Typography>
-          <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 3 }}>
-            <LocalizationProvider dateAdapter={AdapterDateFns}>
-              <DatePicker
-                label="Collection Date"
-                value={date}
-                onChange={(newValue) => setDate(newValue)}
-                renderInput={(params) => <TextField {...params} />}
-              />
-            </LocalizationProvider>
-            <TextField
-              label="Search by Name or A/C No."
-              variant="outlined"
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              sx={{ width: '50%' }}
-            />
-          </Box>
+          <Stack spacing={2.5}>
+            <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 2, flexWrap: 'wrap' }}>
+              <Box>
+                <Typography variant="h4" sx={{ fontFamily: 'Georgia, serif' }}>Daily Collection Schedule</Typography>
+                <Typography variant="body2" color="text.secondary">Save amount against each account. Each save also updates the calendar-month summary for that user.</Typography>
+              </Box>
+              <Typography variant="h6">Total collected today: {totalCollected}</Typography>
+            </Box>
 
-          <div style={{ height: 'calc(100vh - 300px)', width: '100%' }}>
+            <Box sx={{ display: 'flex', gap: 2, flexWrap: 'wrap' }}>
+              <LocalizationProvider dateAdapter={AdapterDateFns}>
+                <DatePicker label="Collection Date" value={date} onChange={(newValue) => setDate(newValue || new Date())} renderInput={(params) => <TextField {...params} />} />
+              </LocalizationProvider>
+              <TextField label="Search by name, account, nominee" variant="outlined" value={searchQuery} onChange={(event) => setSearchQuery(event.target.value)} sx={{ minWidth: 320 }} />
+            </Box>
+
+            <Box sx={{ height: 'calc(100vh - 280px)', width: '100%' }}>
               <DataGrid
-                  rows={rows}
-                  columns={columns}
-                  pageSize={10}
-                  rowsPerPageOptions={[10, 25, 50]}
-                  disableSelectionOnClick
-                  getRowHeight={() => 'auto'}
-                  sx={{ '&.MuiDataGrid-root--densityCompact .MuiDataGrid-cell': { py: '8px' } }}
+                rows={filteredCustomers}
+                columns={columns}
+                pageSize={10}
+                rowsPerPageOptions={[10, 25, 50]}
+                disableRowSelectionOnClick
+                getRowHeight={() => 84}
+                sx={{ '&.MuiDataGrid-root--densityCompact .MuiDataGrid-cell': { py: '8px' } }}
               />
-          </div>
-
+            </Box>
+          </Stack>
         </CardContent>
       </Card>
     </Container>
